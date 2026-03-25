@@ -1,6 +1,6 @@
 async function sendMessageToBg({ type = 'general', data = {} } = {}) {
   try {
-    const response = await browser.runtime.sendMessage({ type, data });
+    const response = await chrome.runtime.sendMessage({ type, data });
     return response;
   } catch (error) {
     console.error("sendMessageToBackground error: ", error);

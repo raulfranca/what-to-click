@@ -1,4 +1,15 @@
-browser.runtime.onMessage.addListener(async ({ type = 'general', data = {} }, sender) => {
+importScripts('/background/helpers/localforage.min.js');
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const { type = 'general', data = {} } = message;
+  handleMessage(type, data, sender).then(sendResponse).catch((err) => {
+    console.error(err);
+    sendResponse(null);
+  });
+  return true;
+});
+
+async function handleMessage(type, data, sender) {
   if (type === 'mousedown') {
     const currentSession = await localforage.getItem('currentSession');
     if (currentSession == null) {
@@ -11,16 +22,7 @@ browser.runtime.onMessage.addListener(async ({ type = 'general', data = {} }, se
       scrollX: data.scrollX,
       scrollY: data.scrollY,
     }, data.documentSize, data.size);
-    const image = await browser.tabs.captureVisibleTab({
-      format: 'jpeg',
-      quality: 95,
-      rect: {
-        x: screenshotPosition.x,
-        y: screenshotPosition.y,
-        width: data.size,
-        height: data.size,
-      }
-    });
+    const image = await captureAndCrop(sender.tab.windowId, screenshotPosition, data.size);
     await localforage.setItem(
       sessionKey,
       [...await localforage.getItem(sessionKey) || [], {
@@ -49,32 +51,24 @@ browser.runtime.onMessage.addListener(async ({ type = 'general', data = {} }, se
     return await localforage.getItem(`images-${data.session}`) || [];
   } else if (type === 'fetchSessions') {
     return await localforage.getItem('sessions') || [];
-  } else if (type === 'savePdf') {
-    return await browser.tabs.saveAsPDF({
-      toFileName: `what-to-click-${new Date().toDateString()}.pdf`,
-      footerLeft: '',
-      footerRight: '',
-      headerLeft: '',
-      headerRight: '',
-    });
   }
-});
+}
 
-browser.browserAction.onClicked.addListener(async () => {
+chrome.action.onClicked.addListener(async () => {
   const sessionActive = await localforage.getItem('currentSession');
   if (sessionActive) {
     await localforage.setItem('currentSession', null);
-    await browser.browserAction.setIcon({ path: '/icons/record.svg' });
-    await browser.browserAction.setBadgeText({ text: '' });
+    await chrome.action.setIcon({ path: '/icons/record.svg' });
+    await chrome.action.setBadgeText({ text: '' });
     if ((await localforage.getItem(`images-${sessionActive}`)).length > 0) {
-      await browser.tabs.create({ url: `/content/page.html?s=${encodeURIComponent(sessionActive)}`, active: false });
+      await chrome.tabs.create({ url: `/content/page.html?s=${encodeURIComponent(sessionActive)}`, active: false });
     }
   } else {
     const session = new Date().toISOString();
     await localforage.setItem('currentSession', session);
     await localforage.setItem('sessions', [...(await localforage.getItem('sessions') || []), session]);
-    await browser.browserAction.setIcon({ path: '/icons/stop.svg' });
-    await browser.browserAction.setBadgeText({ text: 'live' });
+    await chrome.action.setIcon({ path: '/icons/stop.svg' });
+    await chrome.action.setBadgeText({ text: 'live' });
   }
 });
 
@@ -107,7 +101,28 @@ function calculateScreenshotPosition(clickPosition = { x: 0, y: 0, scrollX: 0, s
   return { x: correctedX, y: correctedY, offset };
 }
 
-browser.webNavigation.onCommitted.addListener(async (event) => {
+async function captureAndCrop(windowId, screenshotPosition, size) {
+  const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 95 });
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
+
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, screenshotPosition.x, screenshotPosition.y, size, size, 0, 0, size, size);
+
+  const outputBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
+  const buffer = await outputBlob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 65536;
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return `data:image/jpeg;base64,${btoa(binary)}`;
+}
+
+chrome.webNavigation.onCommitted.addListener(async (event) => {
   const currentSession = await localforage.getItem('currentSession');
   if (currentSession == null) {
     return;

@@ -13,7 +13,7 @@ export async function savePdf() {
     ).querySelector('span');
     textarea.replaceWith(span);
   });
-  await browser.runtime.sendMessage({ type: 'savePdf' });
+  window.print();
   document.querySelectorAll('[wtc-textarea]').forEach((span, index) => {
     const textarea = textareas[index];
     span.replaceWith(textarea);

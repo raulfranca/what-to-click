@@ -6,7 +6,7 @@ import { BackNavigationStep, ScreenshotStep, StartingStep } from "./ui.js";
 export async function loadSteps(sessionId = new URLSearchParams(window.location.href.split('?')[1]).get('s')) {
   async function tryFetchExtension() {
     try {
-      return browser.runtime.sendMessage({ type: 'fetchImages', data: { session: sessionId } });
+      return chrome.runtime.sendMessage({ type: 'fetchImages', data: { session: sessionId } });
     } catch (e) {
       console.error(e);
       return null;
