@@ -58,7 +58,7 @@ chrome.action.onClicked.addListener(async () => {
   const sessionActive = await localforage.getItem('currentSession');
   if (sessionActive) {
     await localforage.setItem('currentSession', null);
-    await chrome.action.setIcon({ path: '/icons/record.svg' });
+    await chrome.action.setIcon({ imageData: makeIconImageData('record') });
     await chrome.action.setBadgeText({ text: '' });
     if ((await localforage.getItem(`images-${sessionActive}`)).length > 0) {
       await chrome.tabs.create({ url: `/content/page.html?s=${encodeURIComponent(sessionActive)}`, active: false });
@@ -67,10 +67,32 @@ chrome.action.onClicked.addListener(async () => {
     const session = new Date().toISOString();
     await localforage.setItem('currentSession', session);
     await localforage.setItem('sessions', [...(await localforage.getItem('sessions') || []), session]);
-    await chrome.action.setIcon({ path: '/icons/stop.svg' });
+    await chrome.action.setIcon({ imageData: makeIconImageData('stop') });
     await chrome.action.setBadgeText({ text: 'live' });
   }
 });
+
+// createImageBitmap cannot decode SVG in a service worker context.
+// Draw icons programmatically instead.
+function makeIconImageData(type, size = 48) {
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = '#cc0000';
+  if (type === 'record') {
+    // Hollow red circle = "ready to record"
+    ctx.strokeStyle = '#cc0000';
+    ctx.lineWidth = size * 0.12;
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size * 0.38, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    // Filled red square = "stop recording"
+    const margin = Math.round(size * 0.15);
+    ctx.fillRect(margin, margin, size - margin * 2, size - margin * 2);
+  }
+  return ctx.getImageData(0, 0, size, size);
+}
 
 function calculateScreenshotPosition(clickPosition = { x: 0, y: 0, scrollX: 0, scrollY: 0 }, documentSize = { width: 0, height: 0 }, size = 300) {
   const x = clickPosition.x - size / 2;
@@ -103,8 +125,15 @@ function calculateScreenshotPosition(clickPosition = { x: 0, y: 0, scrollX: 0, s
 
 async function captureAndCrop(windowId, screenshotPosition, size) {
   const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 95 });
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
+  // fetch() with data: URLs is unreliable in Chrome extension service workers;
+  // decode the base64 payload directly instead.
+  const base64Data = dataUrl.split(',')[1];
+  const binaryString = atob(base64Data);
+  const inputBytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    inputBytes[i] = binaryString.charCodeAt(i);
+  }
+  const blob = new Blob([inputBytes], { type: 'image/jpeg' });
   const bitmap = await createImageBitmap(blob);
 
   const canvas = new OffscreenCanvas(size, size);

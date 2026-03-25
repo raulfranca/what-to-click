@@ -1,5 +1,6 @@
 async function sendMessageToBg({ type = 'general', data = {} } = {}) {
   try {
+    if (typeof chrome === 'undefined' || !chrome.runtime) return null;
     const response = await chrome.runtime.sendMessage({ type, data });
     return response;
   } catch (error) {
